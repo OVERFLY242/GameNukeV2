@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Galerie Photo par utilisateur</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 20px; }
+  .hidden { display: none; }
+  .gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+  .card { border: 1px solid #ccc; padding: 10px; border-radius: 10px; text-align: center; width: 220px; position: relative; }
+  .card img { width: 200px; display: block; margin-bottom: 5px; }
+  button, select, input, textarea { margin-top: 5px; }
+  .owner-label { font-size: 0.85em; color: #555; margin-bottom: 5px; }
+  .blocked-message {
+    width: 200px;
+    height: 150px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: red;
+    border: 2px dashed red;
+    margin-bottom: 5px;
+    font-weight: bold;
+    font-size: 0.9em;
+    text-align: center;
+    padding: 10px;
+  }
+  #userBlockList {
+    margin-bottom: 20px;
+  }
+  #userBlockList h3 {
+    margin-bottom: 5px;
+  }
+  .block-btn {
+    margin-left: 10px;
+    font-size: 0.85em;
+  }
+  #reportSection {
+    margin-top: 20px;
+  }
+  #reportSection textarea {
+    width: 100%;
+    height: 80px;
+    resize: vertical;
+  }
+  #adminReports {
+    margin-top: 30px;
+    border-top: 2px solid #ccc;
+    padding-top: 10px;
+  }
+  .report-item {
+    border-bottom: 1px solid #ddd;
+    padding: 5px 0;
+    position: relative;
+  }
+  .report-header {
+    font-weight: bold;
+    font-size: 0.9em;
+    color: #333;
+  }
+  .report-date {
+    font-size: 0.8em;
+    color: #666;
+  }
+  .delete-report-btn, .reply-report-btn, .send-reply-btn, .cancel-reply-btn {
+    font-size: 0.8em;
+    border: none;
+    border-radius: 3px;
+    padding: 2px 6px;
+    cursor: pointer;
+    margin-left: 5px;
+  }
+  .delete-report-btn {
+    background: #e74c3c;
+    color: white;
+  }
+  .reply-report-btn {
+    background: #3498db;
+    color: white;
+  }
+  .send-reply-btn {
+    background: #2ecc71;
+    color: white;
+  }
+  .cancel-reply-btn {
+    background: #95a5a6;
+    color: white;
+  }
+  .reply-box {
+    margin-top: 5px;
+  }
+  .admin-reply {
+    margin-top: 5px;
+    padding: 5px;
+    background-color: #f0f8ff;
+    border-left: 3px solid #3498db;
+    font-style: italic;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+  }
+  #reportMsg {
+    margin-top: 5px;
+  }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h2>Connexion</h2>
+  <input type="text" id="username" placeholder="Nom d'utilisateur"><br />
+  <input type="password" id="password" placeholder="Mot de passe"><br />
+  <button onclick="login()">Se connecter</button>
+  <p id="error" style="color:red;"></p>
+</div>
+
+<div id="dashboard" class="hidden">
+  <h2>Bienvenue, <span id="userDisplay"></span> (<span id="roleDisplay"></span>)</h2>
+  <button onclick="logout()">Se déconnecter</button><br /><br />
+
+  <div id="uploadSection" class="hidden">
+    <label for="targetUser">Uploader pour :</label>
+    <select id="targetUser"></select><br />
+    <input type="file" id="imageInput" accept="image/*" />
+    <button onclick="uploadImage()">Uploader</button><br /><br />
+  </div>
+
+  <div id="userBlockList" class="hidden">
+    <h3>Gérer blocage des utilisateurs :</h3>
+    <div id="blockList"></div>
+  </div>
+
+  <h3>Galerie :</h3>
+  <div class="gallery" id="gallery"></div>
+
+  <!-- Section rapport problème utilisateur (visible que utilisateur) -->
+  <div id="reportSection" class="hidden">
+    <h3>Signaler un problème</h3>
+    <textarea id="reportText" placeholder="Décrivez votre problème ici..."></textarea><br />
+    <button onclick="sendReport()">Envoyer le rapport</button>
+    <p id="reportMsg" style="color:red;"></p>
+  </div>
+
+  <!-- Section rapports admin -->
+  <div id="adminReports" class="hidden">
+    <h3>Rapports des utilisateurs :</h3>
+    <div id="reportsList"></div>
+  </div>
+</div>
+
+<script>
+  const users = {
+    "Axel.Brossard": { password: "admin123#*", role: "admin" },
+    "Matheo.Alves": { password: "mat123", role: "user" },
+    "Gabin.Paynot": { password: "gab123", role: "user" },
+    "Anthony.Briffaud": { password: "antho123", role: "user" }
+  };
+
+  const REPORT_LIMIT = 3;
+  const REPORT_TIME_WINDOW = 20 * 60 * 1000; // 20 minutes in ms
+
+  function login() {
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    const user = users[username];
+
+    if (user && user.password === password) {
+      sessionStorage.setItem("user", username);
+      sessionStorage.setItem("role", user.role);
+      showDashboard();
+    } else {
+      document.getElementById("error").textContent = "Identifiants incorrects.";
+    }
+  }
+
+  function logout() {
+    sessionStorage.clear();
+    location.reload();
+  }
+
+  function showDashboard() {
+    const user = sessionStorage.getItem("user");
+    const role = sessionStorage.getItem("role");
+
+    if (!user || !role) return;
+
+    document.getElementById("login").classList.add("hidden");
+    document.getElementById("dashboard").classList.remove("hidden");
+    document.getElementById("userDisplay").textContent = user;
+    document.getElementById("roleDisplay").textContent = role;
+
+    if (role === "admin") {
+      document.getElementById("uploadSection").classList.remove("hidden");
+      document.getElementById("userBlockList").classList.remove("hidden");
+      document.getElementById("reportSection").classList.add("hidden");
+      document.getElementById("adminReports").classList.remove("hidden");
+      populateTargetUserSelect();
+      renderBlockList();
+      renderReports();
+    } else {
+      document.getElementById("uploadSection").classList.add("hidden");
+      document.getElementById("userBlockList").classList.add("hidden");
+      document.getElementById("reportSection").classList.remove("hidden");
+      document.getElementById("adminReports").classList.add("hidden");
+      clearReportMsg();
+    }
+
+    loadGallery();
+  }
+
+  function populateTargetUserSelect() {
+    const select = document.getElementById("targetUser");
+    select.innerHTML = "";
+
+    const optionAll = document.createElement("option");
+    optionAll.value = "all";
+    optionAll.textContent = "Tous les utilisateurs";
+    select.appendChild(optionAll);
+
+    for (const username in users) {
+      const option = document.createElement("option");
+      option.value = username;
+      option.textContent = username + (users[username].role === "admin" ? " (admin)" : "");
+      select.appendChild(option);
+    }
+  }
+
+  function uploadImage() {
+  const input = document.getElementById("imageInput");
+  const file = input.files[0];
+  if (!file) return alert("Sélectionne une image.");
+
+  const targetUser = document.getElementById("targetUser").value;
+  if (!targetUser) return alert("Sélectionne un utilisateur cible.");
+
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const base64Image = e.target.result.split(',')[1]; // on enlève le préfixe "data:image/png;base64,..."
+
+    fetch("https://api.imgur.com/3/image", {
+      method: "POST",
+      headers: {
+        Authorization: "Client-ID 2343a8f85f88271", // 🔁 remplace ici
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        image: base64Image,
+        type: "base64",
+      }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        const imgUrl = data.data.link;
+        const images = JSON.parse(localStorage.getItem("images") || "[]");
+        const id = Date.now();
+        images.push({ id, src: imgUrl, owner: targetUser });
+        localStorage.setItem("images", JSON.stringify(images));
+        loadGallery();
+        input.value = "";
+      } else {
+        alert("Erreur Imgur : " + data.data.error);
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert("Erreur lors de l'envoi à Imgur.");
+    });
+  };
+
+  reader.readAsDataURL(file);
+}
+
+
+  function deleteImage(id) {
+    let images = JSON.parse(localStorage.getItem("images") || "[]");
+    images = images.filter(img => img.id !== id);
+    localStorage.setItem("images", JSON.stringify(images));
+    loadGallery();
+  }
+
+  function getBlockedUsers() {
+    return JSON.parse(localStorage.getItem("blockedUsers") || "[]");
+  }
+
+  function toggleBlockUser(username) {
+    let blocked = getBlockedUsers();
+    if (blocked.includes(username)) {
+      blocked = blocked.filter(u => u !== username);
+    } else {
+      blocked.push(username);
+    }
+    localStorage.setItem("blockedUsers", JSON.stringify(blocked));
+    renderBlockList();
+    loadGallery();
+  }
+
+  function renderBlockList() {
+    const blockListDiv = document.getElementById("blockList");
+    blockListDiv.innerHTML = "";
+    const blocked = getBlockedUsers();
+
+    for (const username in users) {
+      if (users[username].role === "user") {
+        const images = JSON.parse(localStorage.getItem("images") || "[]");
+        const userHasImages = images.some(img => img.owner === username);
+
+        if (userHasImages) {
+          const div = document.createElement("div");
+          div.textContent = username;
+
+          const btn = document.createElement("button");
+          btn.textContent = blocked.includes(username) ? "Débloquer" : "Bloquer";
+          btn.className = "block-btn";
+          btn.onclick = () => toggleBlockUser(username);
+
+          div.appendChild(btn);
+          blockListDiv.appendChild(div);
+        }
+      }
+    }
+  }
+
+  function loadGallery() {
+    const gallery = document.getElementById("gallery");
+    const role = sessionStorage.getItem("role");
+    const user = sessionStorage.getItem("user");
+    gallery.innerHTML = "";
+
+    const images = JSON.parse(localStorage.getItem("images") || "[]");
+    const blocked = getBlockedUsers();
+
+    let visibleImages = [];
+    if (role === "admin") {
+      visibleImages = images;
+    } else {
+      visibleImages = images.filter(img => img.owner === user || img.owner === "all");
+    }
+
+    visibleImages.forEach(img => {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      if (role === "admin") {
+        const label = document.createElement("div");
+        label.className = "owner-label";
+        label.textContent = img.owner === "all" ? "Assigné à : Tous les utilisateurs" : "Assigné à : " + img.owner;
+        card.appendChild(label);
+      }
+
+      if (blocked.includes(img.owner)) {
+        const blockedMsg = document.createElement("div");
+        blockedMsg.className = "blocked-message";
+        blockedMsg.textContent = "Contenu bloqué par l’administrateur";
+        card.appendChild(blockedMsg);
+      } else {
+        const image = document.createElement("img");
+        image.src = img.src;
+        card.appendChild(image);
+      }
+
+      if (role === "admin") {
+        const btn = document.createElement("button");
+        btn.textContent = "Supprimer";
+        btn.onclick = () => deleteImage(img.id);
+        card.appendChild(btn);
+      }
+
+      gallery.appendChild(card);
+    });
+  }
+
+  // Gestion des rapports utilisateur et réponses admin
+
+  function sendReport() {
+    const reportText = document.getElementById("reportText").value.trim();
+    const reportMsg = document.getElementById("reportMsg");
+    const user = sessionStorage.getItem("user");
+    const now = Date.now();
+
+    if (!reportText) {
+      reportMsg.style.color = "red";
+      reportMsg.textContent = "Merci de saisir un message.";
+      return;
+    }
+
+    // Récupérer rapports existants
+    let reports = JSON.parse(localStorage.getItem("reports") || "[]");
+
+    // Vérifier limite 3 messages / 20 minutes
+    const recentReports = reports.filter(r => r.user === user && (now - r.timestamp) < REPORT_TIME_WINDOW);
+    if (recentReports.length >= REPORT_LIMIT) {
+      // Calcul du temps restant
+      const oldestTime = recentReports.reduce((min, r) => r.timestamp < min ? r.timestamp : min, now);
+      const waitTimeMs = REPORT_TIME_WINDOW - (now - oldestTime);
+      const waitMinutes = Math.floor(waitTimeMs / 60000);
+      const waitSeconds = Math.floor((waitTimeMs % 60000) / 1000);
+      reportMsg.style.color = "red";
+      reportMsg.textContent = `Vous avez atteint la limite de 3 messages. Veuillez attendre ${waitMinutes} min ${waitSeconds} sec avant d’envoyer un nouveau message.`;
+      return;
+    }
+
+    // Ajouter rapport
+    const newReport = {
+      id: Date.now().toString() + Math.random().toString(36).slice(2),
+      user,
+      text: reportText,
+      timestamp: now,
+      reply: null
+    };
+
+    reports.push(newReport);
+    localStorage.setItem("reports", JSON.stringify(reports));
+    document.getElementById("reportText").value = "";
+    reportMsg.style.color = "green";
+    reportMsg.textContent = "Message envoyé.";
+    renderReports();
+
+    // Nettoyer message après 5 sec
+    setTimeout(() => {
+      reportMsg.textContent = "";
+    }, 5000);
+  }
+
+  // Affiche les rapports côté admin avec options de suppression et réponse
+  function renderReports() {
+    const reportsList = document.getElementById("reportsList");
+    const role = sessionStorage.getItem("role");
+    reportsList.innerHTML = "";
+
+    if (role !== "admin") return;
+
+    let reports = JSON.parse(localStorage.getItem("reports") || "[]");
+
+    reports.forEach(r => {
+      const div = document.createElement("div");
+      div.className = "report-item";
+      div.id = "report-" + r.id;
+
+      const header = document.createElement("div");
+      header.className = "report-header";
+      header.textContent = r.user;
+
+      const date = new Date(r.timestamp);
+      const dateSpan = document.createElement("span");
+      dateSpan.className = "report-date";
+      dateSpan.textContent = ` - ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+
+      header.appendChild(dateSpan);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.textContent = "Supprimer";
+      deleteBtn.className = "delete-report-btn";
+      deleteBtn.onclick = () => deleteReport(r.id);
+
+      const replyBtn = document.createElement("button");
+      replyBtn.textContent = "Répondre";
+      replyBtn.className = "reply-report-btn";
+      replyBtn.onclick = () => openReplyBox(r.id);
+
+      div.appendChild(header);
+      div.appendChild(deleteBtn);
+      div.appendChild(replyBtn);
+
+      const textP = document.createElement("p");
+      textP.textContent = r.text;
+      div.appendChild(textP);
+
+      // Afficher réponse admin si existante
+      if (r.reply) {
+        const replyDiv = document.createElement("div");
+        replyDiv.className = "admin-reply";
+        replyDiv.textContent = "Réponse admin : " + r.reply.text + " (" + new Date(r.reply.timestamp).toLocaleString() + ")";
+        div.appendChild(replyDiv);
+      }
+
+      reportsList.appendChild(div);
+    });
+  }
+
+  function deleteReport(reportId) {
+    let reports = JSON.parse(localStorage.getItem("reports") || "[]");
+    reports = reports.filter(r => r.id !== reportId);
+    localStorage.setItem("reports", JSON.stringify(reports));
+    renderReports();
+  }
+
+  function openReplyBox(reportId) {
+    const reportDiv = document.getElementById("report-" + reportId);
+    if (!reportDiv) return;
+
+    // Ne pas ouvrir plusieurs reply boxes
+    if (document.getElementById("replyBox-" + reportId)) return;
+
+    const replyBox = document.createElement("div");
+    replyBox.className = "reply-box";
+    replyBox.id = "replyBox-" + reportId;
+
+    const textarea = document.createElement("textarea");
+    textarea.rows = 3;
+    textarea.style.width = "100%";
+
+    const sendBtn = document.createElement("button");
+    sendBtn.textContent = "Envoyer réponse";
+    sendBtn.className = "send-reply-btn";
+    sendBtn.onclick = () => sendReply(reportId, textarea.value);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "Annuler";
+    cancelBtn.className = "cancel-reply-btn";
+    cancelBtn.onclick = () => replyBox.remove();
+
+    replyBox.appendChild(textarea);
+    replyBox.appendChild(sendBtn);
+    replyBox.appendChild(cancelBtn);
+
+    reportDiv.appendChild(replyBox);
+  }
+
+  function sendReply(reportId, text) {
+    if (!text.trim()) return alert("Le message de réponse ne peut pas être vide.");
+
+    let reports = JSON.parse(localStorage.getItem("reports") || "[]");
+    const reportIndex = reports.findIndex(r => r.id === reportId);
+    if (reportIndex === -1) return alert("Rapport introuvable.");
+
+    reports[reportIndex].reply = {
+      text: text.trim(),
+      timestamp: Date.now()
+    };
+
+    localStorage.setItem("reports", JSON.stringify(reports));
+    renderReports();
+  }
+
+  function clearReportMsg() {
+    document.getElementById("reportMsg").textContent = "";
+  }
+
+  window.onload = showDashboard;
+</script>
+
+</body>
+</html>
